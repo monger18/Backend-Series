@@ -3,6 +3,8 @@ import { ApiError } from "../utils/apiError.js";
 import { User } from "../models/user.model.js";
 import { uploadOnCloudinary } from "../utils/cloudinary.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
+import { verifyJwt } from "../middlewares/auth.middleware.js";
+import jwt from "jsonwebtoken";
 
 const generateAccessandRefereshToken = async (userId) => {
     try {
@@ -118,7 +120,7 @@ const loginUser = asyncHandler(async (req, res) => {
     const { email, username, password } = req.body;
 
     //2
-    if (!email || !username)
+    if (!(email || username))
         throw new ApiError(400, "username or email is required");
 
     const user = await User.findOne({
@@ -192,4 +194,45 @@ const logoutUser = asyncHandler(async (req, res) => {
         .json(new ApiResponse(200, {}, "User Logged Out Successfully"));
 });
 
-export { registerUser, loginUser, logoutUser };
+const refereshAccessToken = asyncHandler(async (req, res) => {
+    const incomingRefereshToken =
+        req.cookies.refereshToken || req.body.refereshToken;
+    if (!incomingRefereshToken) throw new ApiError(401, "Unauthorized request");
+
+    try {
+        const decodedToken = jwt.verify(
+            incomingRefereshToken,
+            process.env.REFERESH_TOKEN_SECRET
+        );
+
+        const user = await User.findById(decodedToken?._id);
+        if (!user) throw new ApiError(401, "Invalid Request Token");
+
+        if (incomingRefereshToken !== user?.refereshToken)
+            throw new ApiError(401, "Referesh token is expired used");
+
+        const options = {
+            httpOnly: true,
+            secure: true,
+        };
+
+        const { accessToken, newrefereshToken } =
+            await generateAccessandRefereshToken(user._id);
+
+        return res
+            .status(200)
+            .cookie("accessToken", accessToken, options)
+            .cookie("refereshToken", newrefereshToken, options)
+            .json(
+                new ApiResponse(
+                    200,
+                    { accessToken, newrefereshToken },
+                    "Access Token refereshed"
+                )
+            );
+    } catch (error) {
+        throw new ApiError(401, error?.message || "Invalid Referesh Token");
+    }
+});
+
+export { registerUser, loginUser, logoutUser, refereshAccessToken };
